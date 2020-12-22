@@ -8,4 +8,4 @@ ACE2 transcript encodes for SARS-CoV2 receptor on host cells, and NRP1 encodes f
 - 1st-2nd row: visualizing expression per gene, co-expression spots of ACE2+ and NRP1+
 - 3rd row: mean co-expression of ACE2+ and NRP1+
 
-[Rmd script](https://github.com/alikhuseynov/st_2d3d/blob/main/st_heart_coexp.Rmd)
+[Rmd script](https://github.com/alikhuseynov/st_2d3d/blob/main/st_heart_coexp.Rmd) using [Seurat](https://github.com/satijalab/seurat), [Plotly](https://github.com/plotly), [Fields](https://github.com/NCAR/Fields), [spatstat](https://github.com/spatstat/spatstat), and other cool packages.

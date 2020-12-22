@@ -1,0 +1,340 @@
+---
+title: "Adult Heart myocardium (left ventricle) - 10X Visium Spatial Transcriptomics data"
+author: "Alik Huseynov"
+date: "`r Sys.Date()`"
+output: 
+  rmarkdown::html_document:
+    theme: lumen
+editor_options: 
+  chunk_output_type: console
+---
+
+#### load R libraries
+```{r load_Rlibs}
+suppressPackageStartupMessages({
+library(ggplot2)
+library(SingleCellExperiment)
+library(scater)
+library(Seurat)
+library(dplyr)
+library(png)
+library(cowplot)
+library(parallel)
+library(harmony)
+library(cetcolor)
+library(gridExtra)
+library(plotly)
+library(ggridges)
+library(jpeg)
+library(fields)
+library(spatstat)
+})
+```
+
+### Load data, publicly available ST. data form 10X Visium
+websource - [10x_spatial_heart](https://support.10xgenomics.com/spatial-gene-expression/datasets/1.1.0/V1_Human_Heart)
+```{r load_spatial_data}
+dir_working<-"my_dir"
+setwd(dir_working)
+
+# load using Seurat, make sure the .h5 file has the name "filtered_feature_bc_matrix.h5"
+heart_lv<-Load10X_Spatial(paste0(dir_root,"/10X_data/adult_heart_10xSpatialExample/"))
+
+
+
+```
+
+#### Process ST data
+```{r process_data}
+# Mitochondrial and Ribosomal content
+grep(pattern = "^MT-", x = rownames(heart_lv@assays$Spatial@counts), value = T)
+grep(pattern = "^RP[SL]", x = rownames(heart_lv@assays$Spatial@counts), value = T)
+# add to meta
+heart_lv[["percent_mito"]]<-PercentageFeatureSet(heart_lv, pattern = "^MT")
+heart_lv[["percent_ribo"]]<-PercentageFeatureSet(heart_lv, pattern = "^RP[SL]")
+heart_lv@meta.data %>% str()
+
+# process data using SCTransform
+table(heart_lv$nFeature_Spatial >200) # keep spots with more than 200 genes
+heart_lv<-subset(heart_lv, subset = nFeature_Spatial > 200)
+heart_lv<-SCTransform(heart_lv, assay = "Spatial", verbose = T,return.only.var.genes = FALSE,variable.features.n = 5000)
+if (!heart_lv@active.assay=="SCT"){heart_lv@active.assay<-"SCT"}
+```
+
+#### Analyze and Visualiaze ST data
+```{r analyze_data}
+gene_set<-c("ACE2","TMPRSS2","CTSB","CTSL","NRP1") # COVID19 related genes
+
+# plot expression and HE
+DefaultAssay(heart_lv)<-"SCT"
+st_exp<-lapply(length(gene_set) %>% seq(), function(i) 
+  SpatialPlot(heart_lv, image.alpha = 0.8,alpha = c(0.5,1),features = gene_set[i],slot = "data",
+                   pt.size.factor = 1.6,interactive = F) + theme(legend.position = "right") + 
+  scale_fill_gradientn(name = gene_set[i], colours = c("gray14",cet_pal(16, name = "fire")[2:16])) + 
+  ggdark::dark_theme_classic(base_size=25, base_family="Avenir") + theme(legend.text=element_text(size=28),legend.position="right", legend.key.height=grid::unit(2.5,"cm"),
+        legend.key.width=grid::unit(0.8,"cm")) + 
+    labs(title = paste0(gene_set[i]," Expression"),subtitle = "Heart LV - 10X Visium", x = "Spots x", y = "Spots y"))
+# plot st expression
+st_exp[[1]] # ACE2 expression
+st_exp[[5]] # NRP1 expression
+
+# get co-expression spots for ACE2 and NRP1----
+co_exp<-FetchData(heart_lv, slot = "data",vars = c("ACE2","NRP1"))
+str(co_exp)
+# co-expression spot index
+which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0)) %>% str() # ACE2-NRP1
+# co-expression spots
+co_exp[[1]][which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))]]
+co_exp[[2]][which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))]]
+
+# subset
+which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))] # co-expression spots index
+heart_lv_ACE2.NRP1<-heart_lv # clone obj
+which(rownames(heart_lv_ACE2.NRP1@assays$SCT@data) %in% c("ACE2","NRP1")) # gene index
+heart_lv_ACE2.NRP1@assays$SCT@data[which(rownames(heart_lv_ACE2.NRP1@assays$SCT@data) %in% c("ACE2","NRP1")),
+                                   which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))]] # co-expression spots
+which(!seq(length(co_exp[[1]])) %in% which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))]) %>% str() # not co-expression spots index
+heart_lv_ACE2.NRP1@assays$SCT@data[which(rownames(heart_lv_ACE2.NRP1@assays$SCT@data) %in% c("ACE2","NRP1")),
+                                   which(!seq(length(co_exp[[1]])) %in% which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))])] # not co-expression spots in data array
+heart_lv_ACE2.NRP1@assays$SCT@data[which(rownames(heart_lv_ACE2.NRP1@assays$SCT@data) %in% c("ACE2","NRP1")),
+                                   which(!seq(length(co_exp[[1]])) %in% which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))])] %>% str()
+# set not co-expression spots to 0
+attr(heart_lv_ACE2.NRP1@assays$SCT@data[which(rownames(heart_lv_ACE2.NRP1@assays$SCT@data) %in% c("ACE2","NRP1")),
+                                   which(!seq(length(co_exp[[1]])) %in% which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))])], "x" )[ attr(heart_lv_ACE2.NRP1@assays$SCT@data[which(rownames(heart_lv_ACE2.NRP1@assays$SCT@data) %in% c("ACE2","NRP1")),
+                                   which(!seq(length(co_exp[[1]])) %in% which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))])], "x" ) >= 0]<-0
+# check, should be all emplty
+heart_lv_ACE2.NRP1@assays$SCT@data[which(rownames(heart_lv_ACE2.NRP1@assays$SCT@data) %in% c("ACE2","NRP1")),
+                                   which(!seq(length(co_exp[[1]])) %in% which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))])] # not co-expression spots
+# modified object with spots that express both ACE2 and NRP1
+heart_lv_ACE2.NRP1
+
+# plot co-expression separately for ACE2 and NRP1----
+# DarkTheme
+st_exp<-lapply(length(gene_set) %>% seq(), function(i) 
+  SpatialPlot(heart_lv_ACE2.NRP1, image.alpha = 0.8,alpha = c(0.3,1),features =gene_set[i],slot = "data",
+                   pt.size.factor = 2,interactive = F) + theme(legend.position = "right") + 
+  scale_fill_gradientn(name = gene_set[i], colours = c("gray14",cet_pal(16, name = "fire")[2:16]), breaks = round(seq(min(st_exp[[i]]$data[[3]]), max(st_exp[[i]]$data[[3]]),0.4),digits = 1)) + 
+  #scale_fill_gradientn(name = gene_set[i], colours = cet_pal(16, name = "fire")[3:16], breaks = round(seq(min(st_exp[[i]]$data[[3]]), max(st_exp[[i]]$data[[3]]),0.2),digits = 1)) +
+  ggdark::dark_theme_classic(base_size=25, base_family="Avenir") + theme(legend.text=element_text(size=28),legend.position="right", legend.key.height=grid::unit(2.5,"cm"),
+        legend.key.width=grid::unit(0.8,"cm")) + 
+    labs(title = paste0(gene_set[i]," Expression"),subtitle = "Heart LV - 10X Visium", x = "Spots x", y = "Spots y"))
+# plot st expression
+st_exp[[1]] # ACE2
+st_exp[[5]] # NRP1
+
+# ..plot White Background
+st_exp<-lapply(length(gene_set) %>% seq(), function(i) 
+  SpatialPlot(heart_lv_ACE2.NRP1, image.alpha = 0.8,alpha = c(0.3,1),features =gene_set[i],slot = "data",
+                   pt.size.factor = 2, interactive = F) + theme(legend.position = "right") + 
+  #scale_fill_gradientn(name = gene_set[i], colours = c("gray14",cet_pal(16, name = "fire")[2:16]), breaks = round(seq(min(st_exp[[i]]$data[[3]]), max(st_exp[[i]]$data[[3]]),0.4),digits = 1)) + 
+  scale_fill_gradientn(name = gene_set[i], colours = c(rev(cet_pal(15, name = "fire",alpha = 1)[-c(1:2)]),"gray14")[-c(1:2)], breaks = round(seq(min(st_exp[[i]]$data[[3]]), max(st_exp[[i]]$data[[3]]),0.4),digits = 1)) +
+  ggplot2::theme_classic(base_size=25, base_family="Avenir") + theme(legend.text=element_text(size=28),legend.position="right", legend.key.height=grid::unit(2.5,"cm"),
+        legend.key.width=grid::unit(0.8,"cm")) + 
+    labs(title = paste0(gene_set[i]," Expression"),subtitle = "Heart LV - 10X Visium", x = "Spots x", y = "Spots y"))
+# plot st expression
+st_exp[[1]] # ACE2
+st_exp[[5]] # NRP1
+
+# image processing to get smoothed hotspots of expression----
+# using Gaussian Kernel from package fields and spatstat
+mat<-lapply(length(gene_set) %>% seq(), function(i) 
+  as.image(FetchData(heart_lv_ACE2.NRP1,slot = "data",vars = gene_set)[[i]], x=cbind(GetTissueCoordinates(heart_lv_ACE2.NRP1)[[2]], max(GetTissueCoordinates(heart_lv_ACE2.NRP1)[[1]]) - GetTissueCoordinates(heart_lv_ACE2.NRP1)[[1]] + min(GetTissueCoordinates(heart_lv_ACE2.NRP1)[[1]])), nx = max(GetTissueCoordinates(heart_lv_ACE2.NRP1)[[1]]), ny = max(GetTissueCoordinates(heart_lv_ACE2.NRP1)[[1]])))
+# function for smoothing the spots
+smoothImage<-function(i, image.smooth.theta=2.6, blur.sigma = 8){
+# apply 2D smoothing kernel
+gaussianKern <- function(x, sigma=2){1/sqrt(2*pi*sigma^2) * exp(-0.5*(x)^2 / sigma^2)} # eg https://github.com/NCAR/fields/blob/master/vignette/smooth.Rmd
+mat_kd<-image.smooth(mat[[i]],kernel.function = gaussianKern,theta = image.smooth.theta)
+#mat_kd<-image.smooth(mat,theta = 8)
+#image.plot(mat_kd,col = c("gray14",cet_pal(16, name = "fire")[2:16]))
+mat2<-as.matrix(blur(as.im(mat_kd), kernel = "gaussian", bleed = F, normalise = F, sigma = blur.sigma))
+#image.plot(mat2 %>% t(), col=c("gray14",cet_pal(16, name = "fire")[2:16]), main="smoothed image")
+#str(mat2)
+mat_kd$z<-mat2 # add expression to z
+return(mat_kd)
+}
+# run it..
+mat_kd_list<-lapply(seq(mat), function(i) smoothImage(i,image.smooth.theta=2.6, blur.sigma = 8))
+
+# get list of interactive plots - heatmap
+st_exp.3D_heatmap_fun<-function(i){
+  st_exp.3D_heatmap_list<-plot_ly(x=mat_kd_list[[i]]$x, y=mat_kd_list[[i]]$y, z=mat_kd_list[[i]]$z,type = "heatmap",colors = c("gray14",cet_pal(16, name = "fire")[2:16]))
+  st_exp.3D_heatmap_list<-st_exp.3D_heatmap_list %>% colorbar(tickfont=list(color="ivory")) %>% layout(legend = list(font = list(family = "Courier New", size = 12,color="ivory")),
+                              xaxis = list(title = paste0("Spots x"), backgroundcolor="black", color="ivory", gridcolor="black",showbackground=T,zerolinecolor="black"), 
+                              yaxis = list(title = paste0("Spots y"),backgroundcolor="black", color="ivory", gridcolor="black",showbackground=T,zerolinecolor="black"),
+                              annotations = list(x = 0.5,y = 1.04,text = paste0(gene_set[i]),size = 2,xref = "paper",yref = "paper",showarrow = F,
+                                                font = list(family = "Courier New", size = 25,color="ivory")),
+                              paper_bgcolor = "black", plot_bgcolor = "black")
+  return(st_exp.3D_heatmap_list)
+}
+
+st_exp.3D_heatmap_list<-lapply(seq(mat_kd_list), function(i) st_exp.3D_heatmap_fun(i))
+gene_set # check gene names
+st_exp.3D_heatmap_list[[1]]
+st_exp.3D_heatmap_list[[5]]
+
+# get list of interactive plots - surface
+st_exp.3D_surface_fun<-function(i){
+  st_exp.3D_surface_list<-plot_ly(x=mat_kd_list[[i]]$x, y=mat_kd_list[[i]]$y, z=mat_kd_list[[i]]$z,type = "surface",colors = c("gray14",cet_pal(16, name = "fire")[2:16]))
+  st_exp.3D_surface_list<-st_exp.3D_surface_list %>% colorbar(tickfont=list(color="ivory")) %>% layout(legend = list(font = list(family = "Courier New", size = 20,color="ivory")),
+                              scene = list(xaxis = list(title = paste0("Spots x"),backgroundcolor="black", color="ivory", gridcolor="black",showbackground=T,zerolinecolor="black"), 
+                                           yaxis = list(title = paste0("Spots x"),backgroundcolor="black", color="ivory", gridcolor="black",showbackground=T,zerolinecolor="black"), 
+                                           zaxis = list(title = paste0("Expression"),backgroundcolor="black", color="ivory", gridcolor="black",showbackground=T,zerolinecolor="black")),
+                              annotations = list(x = 0.5,y = 1.04,text = paste0(gene_set[i]),size = 2,xref = "paper",yref = "paper",showarrow = F, 
+                                                 font = list(family = "Courier New", size = 25,color="ivory")),
+                              paper_bgcolor = "black", plot_bgcolor = "black")
+  return(st_exp.3D_surface_list)
+}
+
+st_exp.3D_surface_list<-lapply(seq(mat_kd_list), function(i) st_exp.3D_surface_fun(i))
+gene_set # check gene names
+st_exp.3D_surface_list[[1]]
+st_exp.3D_surface_list[[5]]
+#
+
+# plotly on White background----
+# list of plots heatmap
+st_exp.3D_heatmap_fun<-function(i){
+  st_exp.3D_heatmap_list<-plot_ly(x=mat_kd_list[[i]]$x, y=mat_kd_list[[i]]$y, z=mat_kd_list[[i]]$z,type = "heatmap",colors = c(rev(cet_pal(15, name = "fire",alpha = 1)[-c(1:2)]),"gray14")[-c(1:2)])
+  st_exp.3D_heatmap_list<-st_exp.3D_heatmap_list %>% colorbar(tickfont=list(color="gray1")) %>% layout(legend = list(font = list(family = "Courier New", size = 15,color="gray1")),
+                              xaxis = list(title = paste0("Spots x"), backgroundcolor="white", color="gray1", gridcolor="gray1",showbackground=T,zerolinecolor="white"), 
+                              yaxis = list(title = paste0("Spots y"),backgroundcolor="white", color="gray1", gridcolor="gray1",showbackground=T,zerolinecolor="white"),
+                              annotations = list(x = 0.5,y = 1.04,text = paste0(gene_set[i]),size = 2,xref = "paper",yref = "paper",showarrow = F,
+                                                font = list(family = "Courier New", size = 25,color="gray1")),
+                              paper_bgcolor = "white", plot_bgcolor = "white")
+  return(st_exp.3D_heatmap_list)
+}
+
+st_exp.3D_heatmap_list<-lapply(seq(mat_kd_list), function(i) st_exp.3D_heatmap_fun(i))
+gene_set # check gene names
+st_exp.3D_heatmap_list[[1]]
+st_exp.3D_heatmap_list[[5]]
+
+# list of plots surface
+st_exp.3D_surface_fun<-function(i){
+  st_exp.3D_surface_list<-plot_ly(x=mat_kd_list[[i]]$x, y=mat_kd_list[[i]]$y, z=mat_kd_list[[i]]$z,type = "surface",colors = c(rev(cet_pal(15, name = "fire",alpha = 1)[-c(1:2)]),"gray14")[-c(1:2)])
+  st_exp.3D_surface_list<-st_exp.3D_surface_list %>% colorbar(tickfont=list(color="gray1")) %>% layout(legend = list(font = list(family = "Courier New", size = 15,color="gray1")),
+                              scene = list(xaxis = list(title = paste0("Spots x"),backgroundcolor="white", color="gray1", gridcolor="white",showbackground=T,zerolinecolor="white"), 
+                                           yaxis = list(title = paste0("Spots x"),backgroundcolor="white", color="gray1", gridcolor="white",showbackground=T,zerolinecolor="white"), 
+                                           zaxis = list(title = paste0("Expression"),backgroundcolor="white", color="gray1", gridcolor="white",showbackground=T,zerolinecolor="white")),
+                              annotations = list(x = 0.5,y = 1.04,text = paste0(gene_set[i]),size = 2,xref = "paper",yref = "paper",showarrow = F, 
+                                                 font = list(family = "Courier New", size = 25,color="gray1")),
+                              paper_bgcolor = "white", plot_bgcolor = "white")
+  return(st_exp.3D_surface_list)
+}
+
+st_exp.3D_surface_list<-lapply(seq(mat_kd_list), function(i) st_exp.3D_surface_fun(i))
+gene_set # check gene names
+st_exp.3D_surface_list[[1]]
+st_exp.3D_surface_list[[5]]
+
+```
+
+#### Mean expression of ACE2+ NRP1+ spots
+```{r mean_coexp}
+# get mean (natural log) expression of ACE2+ NRP1+ spots----
+co_exp<-FetchData(heart_lv, slot = "data",vars = c("ACE2","NRP1"))
+# co-expression spot index
+which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0)) %>% str() # ACE2-NRP1
+# co-expression spots
+co_exp[[1]][which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))]]
+co_exp[[2]][which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))]]
+# mean expression
+rowMeans(cbind(co_exp[[1]][which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))]],
+      co_exp[[2]][which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))]]))
+
+# subset
+which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))] # co-expression spots index
+heart_lv_ACE2.NRP1_coexp<-heart_lv # clone obj
+which(rownames(heart_lv_ACE2.NRP1_coexp@assays$SCT@data) %in% c("ACE2")) # gene index
+heart_lv_ACE2.NRP1_coexp@assays$SCT@data[which(rownames(heart_lv_ACE2.NRP1_coexp@assays$SCT@data) %in% c("ACE2")),
+                                   which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))]] # co-expression spots
+# set mean co-expression values to spots of ACE2
+heart_lv_ACE2.NRP1_coexp@assays$SCT@data[which(rownames(heart_lv_ACE2.NRP1_coexp@assays$SCT@data) %in% c("ACE2")),
+                                   which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))]]<-rowMeans(cbind(co_exp[[1]][which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))]],
+      co_exp[[2]][which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))]]))
+
+# set not co-expression spots to 0
+attr(heart_lv_ACE2.NRP1_coexp@assays$SCT@data[which(rownames(heart_lv_ACE2.NRP1_coexp@assays$SCT@data) %in% c("ACE2","NRP1")),
+                                   which(!seq(length(co_exp[[1]])) %in% which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))])], "x" )[ attr(heart_lv_ACE2.NRP1_coexp@assays$SCT@data[which(rownames(heart_lv_ACE2.NRP1_coexp@assays$SCT@data) %in% c("ACE2","NRP1")),which(!seq(length(co_exp[[1]])) %in% which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))])], "x" ) >= 0]<-0
+# check, should be all emplty
+heart_lv_ACE2.NRP1_coexp@assays$SCT@data[which(rownames(heart_lv_ACE2.NRP1_coexp@assays$SCT@data) %in% c("ACE2","NRP1")),
+                                   which(!seq(length(co_exp[[1]])) %in% which(!co_exp[[1]]==0)[which(which(!co_exp[[1]]==0) %in% which(!co_exp[[2]]==0))])] # not co-expression spots
+# modified object with spots for co-expression of ACE2 and NRP1
+heart_lv_ACE2.NRP1_coexp
+
+# ..plot mean co-expression White Background----
+st_exp<-lapply(length(gene_set) %>% seq(), function(i) 
+  SpatialPlot(heart_lv_ACE2.NRP1_coexp, image.alpha = 1,alpha = c(0.2,0.8),features =gene_set[i],slot = "data",
+                   pt.size.factor = 2, interactive = F) + theme(legend.position = "right") + 
+  #scale_fill_gradientn(name = gene_set[i], colours = c("gray14",cet_pal(16, name = "fire")[2:16]), breaks = round(seq(min(st_exp[[i]]$data[[3]]), max(st_exp[[i]]$data[[3]]),0.4),digits = 1)) + 
+  scale_fill_gradientn(name = NULL, colours = c(rev(cet_pal(15, name = "fire",alpha = 1)[-c(1:2)]),"gray14")[-c(1:2)], breaks = round(seq(min(st_exp[[i]]$data[[3]]), max(st_exp[[i]]$data[[3]]),0.4),digits = 1)) +
+  ggplot2::theme_classic(base_size=25, base_family="Avenir") + theme(legend.text=element_text(size=28),legend.position="right", legend.key.height=grid::unit(2.5,"cm"),
+        legend.key.width=grid::unit(0.8,"cm")))
+# plot st co-expression
+st_exp[[1]] + labs(title = paste0("ACE2 NRP1 Mean co-expression"),subtitle = "Heart LV - 10X Visium", x = "Spots x", y = "Spots y")
+
+
+# image processing to get smoothed hotspots of expression----
+# using Gaussian Kernel from package fields and spatstat
+mat<-lapply(length(gene_set) %>% seq(), function(i) 
+  as.image(FetchData(heart_lv_ACE2.NRP1_coexp,slot = "data",vars = gene_set)[[i]], x=cbind(GetTissueCoordinates(heart_lv_ACE2.NRP1_coexp)[[2]], max(GetTissueCoordinates(heart_lv_ACE2.NRP1_coexp)[[1]]) - GetTissueCoordinates(heart_lv_ACE2.NRP1_coexp)[[1]] + min(GetTissueCoordinates(heart_lv_ACE2.NRP1_coexp)[[1]])), nx = max(GetTissueCoordinates(heart_lv_ACE2.NRP1_coexp)[[1]]), ny = max(GetTissueCoordinates(heart_lv_ACE2.NRP1_coexp)[[1]])))
+# function for smoothing the spots
+smoothImage<-function(i, image.smooth.theta=2.6, blur.sigma = 8){
+# apply 2D smoothing kernel
+gaussianKern <- function(x, sigma=2){1/sqrt(2*pi*sigma^2) * exp(-0.5*(x)^2 / sigma^2)} # eg https://github.com/NCAR/fields/blob/master/vignette/smooth.Rmd
+mat_kd<-image.smooth(mat[[i]],kernel.function = gaussianKern,theta = image.smooth.theta)
+#mat_kd<-image.smooth(mat,theta = 8)
+#image.plot(mat_kd,col = c("gray14",cet_pal(16, name = "fire")[2:16]))
+mat2<-as.matrix(blur(as.im(mat_kd), kernel = "gaussian", bleed = F, normalise = F, sigma = blur.sigma))
+#image.plot(mat2 %>% t(), col=c("gray14",cet_pal(16, name = "fire")[2:16]), main="smoothed image")
+#str(mat2)
+mat_kd$z<-mat2 # add expression to z
+return(mat_kd)
+}
+# run it..
+mat_kd_list<-lapply(seq(mat), function(i) smoothImage(i,image.smooth.theta=2.6, blur.sigma = 8))
+
+# plotly on White background----
+# list of plots heatmap
+st_exp.3D_heatmap_fun<-function(i){
+  st_exp.3D_heatmap_list<-plot_ly(x=mat_kd_list[[i]]$x, y=mat_kd_list[[i]]$y, z=mat_kd_list[[i]]$z,type = "heatmap",colors = c(rev(cet_pal(15, name = "fire",alpha = 1)[-c(1:2)]),"gray14")[-c(1:2)])
+  st_exp.3D_heatmap_list<-st_exp.3D_heatmap_list %>% colorbar(tickfont=list(color="gray1")) %>% layout(legend = list(font = list(family = "Courier New", size = 15,color="gray1")),
+                              xaxis = list(title = paste0("Spots x"), backgroundcolor="white", color="gray1", gridcolor="gray1",showbackground=T,zerolinecolor="white"), 
+                              yaxis = list(title = paste0("Spots y"),backgroundcolor="white", color="gray1", gridcolor="gray1",showbackground=T,zerolinecolor="white"),
+                              annotations = list(x = 0.5,y = 1.04,text = paste0(gene_set[i]),size = 2,xref = "paper",yref = "paper",showarrow = F,
+                                                font = list(family = "Courier New", size = 25,color="gray1")),
+                              paper_bgcolor = "white", plot_bgcolor = "white")
+  return(st_exp.3D_heatmap_list)
+}
+
+st_exp.3D_heatmap_list<-lapply(seq(mat_kd_list), function(i) st_exp.3D_heatmap_fun(i))
+gene_set # check gene names
+st_exp.3D_heatmap_list[[1]]
+st_exp.3D_heatmap_list[[5]]
+
+# list of plots surface
+st_exp.3D_surface_fun<-function(i){
+  st_exp.3D_surface_list<-plot_ly(x=mat_kd_list[[i]]$x, y=mat_kd_list[[i]]$y, z=mat_kd_list[[i]]$z,type = "surface",colors = c(rev(cet_pal(15, name = "fire",alpha = 1)[-c(1:2)]),"gray14")[-c(1:2)])
+  st_exp.3D_surface_list<-st_exp.3D_surface_list %>% colorbar(tickfont=list(color="gray1")) %>% layout(legend = list(font = list(family = "Courier New", size = 15,color="gray1")),
+                              scene = list(xaxis = list(title = paste0("Spots x"),backgroundcolor="white", color="gray1", gridcolor="white",showbackground=T,zerolinecolor="white"), 
+                                           yaxis = list(title = paste0("Spots x"),backgroundcolor="white", color="gray1", gridcolor="white",showbackground=T,zerolinecolor="white"), 
+                                           zaxis = list(title = paste0("Expression"),backgroundcolor="white", color="gray1", gridcolor="white",showbackground=T,zerolinecolor="white")),
+                              annotations = list(x = 0.5,y = 1.04,text = paste0(gene_set[i]),size = 2,xref = "paper",yref = "paper",showarrow = F, 
+                                                 font = list(family = "Courier New", size = 25,color="gray1")),
+                              paper_bgcolor = "white", plot_bgcolor = "white")
+  return(st_exp.3D_surface_list)
+}
+
+st_exp.3D_surface_list<-lapply(seq(mat_kd_list), function(i) st_exp.3D_surface_fun(i))
+gene_set # check gene names
+st_exp.3D_surface_list[[1]]
+st_exp.3D_surface_list[[5]]
+
+```
+
+
+
+
+
+
+

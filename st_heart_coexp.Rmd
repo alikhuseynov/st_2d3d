@@ -35,7 +35,7 @@ library(spatstat)
 websource - [10x_spatial_heart](https://support.10xgenomics.com/spatial-gene-expression/datasets/1.1.0/V1_Human_Heart)
 ```{r load_spatial_data}
 dir_working<-"my_dir"
-dir_root<-"my_root_dir" # where output from SpaceRanger it saved
+dir_root<-"my_root_dir" # where output from SpaceRanger is located
 setwd(dir_working)
 
 # load data using Seurat, make sure the .h5 file has the name "filtered_feature_bc_matrix.h5"

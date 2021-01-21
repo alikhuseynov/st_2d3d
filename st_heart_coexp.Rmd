@@ -34,13 +34,11 @@ library(spatstat)
 ### Load data, publicly available ST. data form 10X Visium
 websource - [10x_spatial_heart](https://support.10xgenomics.com/spatial-gene-expression/datasets/1.1.0/V1_Human_Heart)
 ```{r load_spatial_data}
-dir_working<-"my_dir"
-dir_root<-"my_root_dir" # where output from SpaceRanger is located
+dir_working<-"my_dir" # 
 setwd(dir_working)
 
-# load data using Seurat, make sure the .h5 file has the name "filtered_feature_bc_matrix.h5"
+# load using Seurat, make sure the .h5 file has the name "filtered_feature_bc_matrix.h5"
 heart_lv<-Load10X_Spatial(paste0(dir_root,"/10X_data/adult_heart_10xSpatialExample/"))
-heart_lv
 
 ```
 
@@ -112,7 +110,8 @@ heart_lv_ACE2.NRP1
 # DarkTheme
 st_exp<-lapply(length(gene_set) %>% seq(), function(i) 
   SpatialPlot(heart_lv_ACE2.NRP1, image.alpha = 0.8,alpha = c(0.3,1),features =gene_set[i],slot = "data",
-                   pt.size.factor = 2,interactive = F) + theme(legend.position = "right") + 
+                   pt.size.factor = 2,interactive = F) + theme(legend.position = "right")) # get data and plots
+st_exp<-lapply(length(gene_set) %>% seq(), function(i)  st_exp[[i]] + 
   scale_fill_gradientn(name = gene_set[i], colours = c("gray14",cet_pal(16, name = "fire")[2:16]), breaks = round(seq(min(st_exp[[i]]$data[[3]]), max(st_exp[[i]]$data[[3]]),0.4),digits = 1)) + 
   #scale_fill_gradientn(name = gene_set[i], colours = cet_pal(16, name = "fire")[3:16], breaks = round(seq(min(st_exp[[i]]$data[[3]]), max(st_exp[[i]]$data[[3]]),0.2),digits = 1)) +
   ggdark::dark_theme_classic(base_size=25, base_family="Avenir") + theme(legend.text=element_text(size=28),legend.position="right", legend.key.height=grid::unit(2.5,"cm"),
@@ -125,7 +124,8 @@ st_exp[[5]] # NRP1
 # ..plot White Background
 st_exp<-lapply(length(gene_set) %>% seq(), function(i) 
   SpatialPlot(heart_lv_ACE2.NRP1, image.alpha = 0.8,alpha = c(0.3,1),features =gene_set[i],slot = "data",
-                   pt.size.factor = 2, interactive = F) + theme(legend.position = "right") + 
+                   pt.size.factor = 2, interactive = F) + theme(legend.position = "right"))
+st_exp<-lapply(length(gene_set) %>% seq(), function(i)  st_exp[[i]] + 
   #scale_fill_gradientn(name = gene_set[i], colours = c("gray14",cet_pal(16, name = "fire")[2:16]), breaks = round(seq(min(st_exp[[i]]$data[[3]]), max(st_exp[[i]]$data[[3]]),0.4),digits = 1)) + 
   scale_fill_gradientn(name = gene_set[i], colours = c(rev(cet_pal(15, name = "fire",alpha = 1)[-c(1:2)]),"gray14")[-c(1:2)], breaks = round(seq(min(st_exp[[i]]$data[[3]]), max(st_exp[[i]]$data[[3]]),0.4),digits = 1)) +
   ggplot2::theme_classic(base_size=25, base_family="Avenir") + theme(legend.text=element_text(size=28),legend.position="right", legend.key.height=grid::unit(2.5,"cm"),
@@ -265,7 +265,8 @@ heart_lv_ACE2.NRP1_coexp
 # ..plot mean co-expression White Background----
 st_exp<-lapply(length(gene_set) %>% seq(), function(i) 
   SpatialPlot(heart_lv_ACE2.NRP1_coexp, image.alpha = 1,alpha = c(0.2,0.8),features =gene_set[i],slot = "data",
-                   pt.size.factor = 2, interactive = F) + theme(legend.position = "right") + 
+                   pt.size.factor = 2, interactive = F) + theme(legend.position = "right"))
+st_exp<-lapply(length(gene_set) %>% seq(), function(i)  st_exp[[i]] + 
   #scale_fill_gradientn(name = gene_set[i], colours = c("gray14",cet_pal(16, name = "fire")[2:16]), breaks = round(seq(min(st_exp[[i]]$data[[3]]), max(st_exp[[i]]$data[[3]]),0.4),digits = 1)) + 
   scale_fill_gradientn(name = NULL, colours = c(rev(cet_pal(15, name = "fire",alpha = 1)[-c(1:2)]),"gray14")[-c(1:2)], breaks = round(seq(min(st_exp[[i]]$data[[3]]), max(st_exp[[i]]$data[[3]]),0.4),digits = 1)) +
   ggplot2::theme_classic(base_size=25, base_family="Avenir") + theme(legend.text=element_text(size=28),legend.position="right", legend.key.height=grid::unit(2.5,"cm"),
